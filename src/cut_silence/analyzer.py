@@ -108,7 +108,7 @@ class VideoAnalyzer:
         return duration
 
     def calculate_non_silent_segments(
-        self, silent_segments: List[Tuple[float, float]], total_duration: float, padding: float = 0.0
+        self, silent_segments: List[Tuple[float, float]], total_duration: float, padding: float = 0.0, min_segment_duration: float = 0.1
     ) -> List[Tuple[float, float]]:
         """
         Calculate non-silent segments from silent segments.
@@ -117,6 +117,7 @@ class VideoAnalyzer:
             silent_segments: List of (start, end) tuples for silent segments
             total_duration: Total video duration in seconds
             padding: Padding to add around speech in seconds
+            min_segment_duration: Minimum duration for a segment to be included (default: 0.1s)
 
         Returns:
             List of (start, end) tuples for non-silent segments
@@ -133,14 +134,22 @@ class VideoAnalyzer:
             adjusted_start = max(0.0, silence_start + padding)
             adjusted_end = min(total_duration, silence_end - padding)
 
-            # Only add non-silent segment if there's actual content
+            # Only add non-silent segment if there's actual content and it meets minimum duration
             if current_time < adjusted_start:
-                non_silent_segments.append((current_time, adjusted_start))
+                duration = adjusted_start - current_time
+                if duration >= min_segment_duration:
+                    non_silent_segments.append((current_time, adjusted_start))
+                elif self.verbose:
+                    print(f"Skipping short segment ({duration:.3f}s) from {current_time:.2f}s to {adjusted_start:.2f}s")
 
             current_time = adjusted_end
 
         # Add final segment if there's content after last silence
         if current_time < total_duration:
-            non_silent_segments.append((current_time, total_duration))
+            duration = total_duration - current_time
+            if duration >= min_segment_duration:
+                non_silent_segments.append((current_time, total_duration))
+            elif self.verbose:
+                print(f"Skipping short segment ({duration:.3f}s) from {current_time:.2f}s to {total_duration:.2f}s")
 
         return non_silent_segments

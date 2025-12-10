@@ -197,7 +197,11 @@ def process_video(
 
         # Check if there's anything to process
         if not non_silent_segments:
-            print("Warning: No non-silent segments found. Video may be entirely silent.")
+            print("\nWarning: No non-silent segments found.")
+            print("The video appears to be entirely silent or audio is very quiet.")
+            print(f"Try adjusting the threshold (current: {threshold}dB)")
+            print("Suggestion: Use a lower threshold like -40dB or -50dB")
+            print("Example: cut-silence input.mp4 --threshold -40")
             return False
 
         # Step 4: Extract segments

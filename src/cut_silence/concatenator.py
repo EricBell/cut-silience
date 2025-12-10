@@ -56,7 +56,17 @@ class VideoConcatenator:
                 stderr=subprocess.PIPE,
                 text=True
             )
-            return result.returncode == 0
+
+            success = result.returncode == 0 and output_path.exists()
+
+            if self.verbose:
+                if success:
+                    print(f"Successfully created: {output_path}")
+                else:
+                    print(f"Failed to copy segment")
+                    print(f"FFmpeg stderr: {result.stderr[-500:]}")  # Last 500 chars
+
+            return success
 
         # Create a temporary concat file list
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
@@ -92,6 +102,7 @@ class VideoConcatenator:
                     print(f"Successfully created: {output_path}")
                 else:
                     print(f"Failed to concatenate segments")
+                    print(f"FFmpeg stderr: {result.stderr[-500:]}")  # Last 500 chars
 
             return success
 
