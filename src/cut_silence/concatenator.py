@@ -4,6 +4,8 @@ Video concatenator module for joining video segments.
 
 from pathlib import Path
 from typing import List
+import subprocess
+import tempfile
 
 
 class VideoConcatenator:
@@ -31,13 +33,72 @@ class VideoConcatenator:
         Returns:
             True if concatenation was successful, False otherwise
         """
-        # TODO: Implement using FFmpeg concat demuxer
-        # Create concat file list, then:
-        # ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
         if self.verbose:
             print(f"Concatenating {len(segment_files)} segments to: {output_path}")
 
-        return False
+        if not segment_files:
+            if self.verbose:
+                print("No segments to concatenate")
+            return False
+
+        # If only one segment, just copy it
+        if len(segment_files) == 1:
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", str(segment_files[0]),
+                "-c", "copy",
+                str(output_path)
+            ]
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            return result.returncode == 0
+
+        # Create a temporary concat file list
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            concat_file = Path(f.name)
+            for segment_file in segment_files:
+                # Use absolute paths and escape special characters
+                abs_path = segment_file.resolve()
+                f.write(f"file '{abs_path}'\n")
+
+        try:
+            # Use FFmpeg concat demuxer to join segments
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_file),
+                "-c", "copy",
+                str(output_path)
+            ]
+
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            success = result.returncode == 0 and output_path.exists()
+
+            if self.verbose:
+                if success:
+                    print(f"Successfully created: {output_path}")
+                else:
+                    print(f"Failed to concatenate segments")
+
+            return success
+
+        finally:
+            # Clean up temporary concat file
+            if concat_file.exists():
+                concat_file.unlink()
 
     def generate_output_path(self, input_path: Path, suffix: str = "_cut") -> Path:
         """

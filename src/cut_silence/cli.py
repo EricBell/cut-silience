@@ -4,6 +4,9 @@ CLI parser and main entry point for Cut-Silence.
 
 import argparse
 import sys
+import tempfile
+import shutil
+import json
 from pathlib import Path
 from typing import List
 
@@ -11,7 +14,12 @@ from cut_silence.config import (
     DEFAULT_SILENCE_THRESHOLD,
     DEFAULT_MIN_SILENCE_DURATION,
     DEFAULT_PADDING,
+    OUTPUT_SUFFIX,
 )
+from cut_silence.analyzer import VideoAnalyzer
+from cut_silence.processor import SegmentProcessor
+from cut_silence.concatenator import VideoConcatenator
+from cut_silence.progress import ProgressReporter
 
 
 def parse_arguments(args: List[str] = None) -> argparse.Namespace:
@@ -114,6 +122,125 @@ def validate_arguments(args: argparse.Namespace) -> None:
             sys.exit(1)
 
 
+def process_video(
+    input_file: Path,
+    output_file: Path,
+    threshold: float,
+    min_duration: float,
+    padding: float,
+    verbose: bool,
+    dry_run: bool,
+    export_segments_path: Path = None,
+) -> bool:
+    """
+    Process a single video file to remove silence.
+
+    Returns:
+        True if processing was successful, False otherwise
+    """
+    print(f"\nProcessing: {input_file}")
+
+    # Initialize components
+    analyzer = VideoAnalyzer(threshold, min_duration, verbose)
+    processor = SegmentProcessor(verbose)
+    concatenator = VideoConcatenator(verbose)
+    reporter = ProgressReporter(verbose)
+
+    try:
+        # Step 1: Get video duration
+        if verbose:
+            print("Getting video duration...")
+        total_duration = analyzer.get_video_duration(input_file)
+        if verbose:
+            print(f"Video duration: {total_duration:.2f}s")
+
+        # Step 2: Detect silence
+        if verbose:
+            print("Detecting silence...")
+        silent_segments = analyzer.detect_silence(input_file)
+
+        # Step 3: Calculate non-silent segments
+        non_silent_segments = analyzer.calculate_non_silent_segments(
+            silent_segments, total_duration, padding
+        )
+
+        if verbose or dry_run:
+            print(f"\nFound {len(silent_segments)} silent segment(s)")
+            print(f"Keeping {len(non_silent_segments)} non-silent segment(s)")
+
+        # Export segments if requested
+        if export_segments_path:
+            export_data = {
+                "input_file": str(input_file),
+                "total_duration": total_duration,
+                "silent_segments": silent_segments,
+                "non_silent_segments": non_silent_segments,
+            }
+            with open(export_segments_path, 'w') as f:
+                json.dump(export_data, f, indent=2)
+            if verbose:
+                print(f"Exported segments to: {export_segments_path}")
+
+        # Calculate statistics
+        silence_duration = sum(end - start for start, end in silent_segments)
+        output_duration = sum(end - start for start, end in non_silent_segments)
+
+        if dry_run:
+            print(f"\nDry-run preview:")
+            print(f"  Original duration:  {reporter._format_time(total_duration)}")
+            print(f"  Silence detected:   {reporter._format_time(silence_duration)}")
+            print(f"  Output duration:    {reporter._format_time(output_duration)}")
+            reduction = (silence_duration / total_duration * 100) if total_duration > 0 else 0
+            print(f"  Reduction:          {reduction:.1f}%")
+            print(f"\nOutput would be saved to: {output_file}")
+            return True
+
+        # Check if there's anything to process
+        if not non_silent_segments:
+            print("Warning: No non-silent segments found. Video may be entirely silent.")
+            return False
+
+        # Step 4: Extract segments
+        if verbose:
+            print("Extracting segments...")
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="cut_silence_"))
+        try:
+            segment_files = processor.extract_segments(
+                input_file, non_silent_segments, temp_dir
+            )
+
+            if not segment_files:
+                print("Error: Failed to extract segments")
+                return False
+
+            # Step 5: Concatenate segments
+            if verbose:
+                print("Concatenating segments...")
+
+            success = concatenator.concatenate_segments(segment_files, output_file)
+
+            if success:
+                reporter.print_summary(total_duration, output_duration, len(silent_segments))
+                print(f"✓ Saved to: {output_file}")
+                return True
+            else:
+                print("Error: Failed to concatenate segments")
+                return False
+
+        finally:
+            # Clean up temporary directory
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+
+    except Exception as e:
+        print(f"Error processing {input_file}: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        return False
+
+
 def main():
     """Main entry point for Cut-Silence CLI."""
     args = parse_arguments()
@@ -128,17 +255,42 @@ def main():
         print(f"Dry-run: {args.dry_run}")
         print()
 
-    # TODO: Implement video processing pipeline
-    # 1. Analyze video for silence
-    # 2. Process segments
-    # 3. Concatenate non-silent segments
-    # 4. Save output
+    # Initialize concatenator for output path generation
+    concatenator = VideoConcatenator(args.verbose)
+
+    success_count = 0
+    failure_count = 0
 
     for input_file in args.input_files:
-        print(f"Processing: {input_file}")
-        # TODO: Call processing pipeline
+        # Determine output file path
+        if args.output:
+            output_file = args.output
+        else:
+            output_file = concatenator.generate_output_path(input_file, OUTPUT_SUFFIX)
 
-    print("Done!")
+        # Process the video
+        success = process_video(
+            input_file=input_file,
+            output_file=output_file,
+            threshold=args.threshold,
+            min_duration=args.duration,
+            padding=args.padding,
+            verbose=args.verbose,
+            dry_run=args.dry_run,
+            export_segments_path=args.export_segments,
+        )
+
+        if success:
+            success_count += 1
+        else:
+            failure_count += 1
+
+    # Print final summary
+    print(f"\n{'='*50}")
+    print(f"Processing complete!")
+    print(f"  Successful: {success_count}")
+    print(f"  Failed:     {failure_count}")
+    print(f"{'='*50}")
 
 
 if __name__ == "__main__":

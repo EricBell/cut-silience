@@ -4,6 +4,7 @@ Segment processor module for handling video segments.
 
 from pathlib import Path
 from typing import List, Tuple
+import subprocess
 
 
 class SegmentProcessor:
@@ -32,12 +33,49 @@ class SegmentProcessor:
         Returns:
             List of paths to extracted segment files
         """
-        # TODO: Implement using FFmpeg segment extraction
-        # ffmpeg -i input.mp4 -ss start_time -to end_time -c copy segment.mp4
         if self.verbose:
             print(f"Extracting {len(segments)} segments from: {video_path}")
 
+        # Create temp directory if it doesn't exist
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
         segment_files = []
+
+        for idx, (start_time, end_time) in enumerate(segments):
+            segment_file = temp_dir / f"segment_{idx:04d}.mp4"
+
+            # Calculate duration
+            duration = end_time - start_time
+
+            # Use FFmpeg to extract segment with stream copy (no re-encoding for speed)
+            # For accuracy, we use -ss before -i for fast seek, then -t for exact duration
+            cmd = [
+                "ffmpeg",
+                "-y",  # Overwrite output files
+                "-i", str(video_path),  # Input file
+                "-ss", str(start_time),  # Start time (accurate when after -i)
+                "-t", str(duration),  # Duration to extract
+                "-c", "copy",  # Copy streams (no re-encoding)
+                "-avoid_negative_ts", "make_zero",  # Fix timestamp issues
+                str(segment_file)
+            ]
+
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            if result.returncode == 0 and segment_file.exists():
+                segment_files.append(segment_file)
+            else:
+                if self.verbose:
+                    print(f"Warning: Failed to extract segment {idx}")
+
+        if self.verbose:
+            print(f"Successfully extracted {len(segment_files)} segments")
+
         return segment_files
 
     def validate_segments(self, segment_files: List[Path]) -> bool:

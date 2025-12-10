@@ -34,13 +34,48 @@ class VideoAnalyzer:
         Returns:
             List of tuples (start_time, end_time) representing silent segments
         """
-        # TODO: Implement using FFmpeg silencedetect filter
-        # ffmpeg -i input.mp4 -af silencedetect=noise=-30dB:d=0.5 -f null -
         if self.verbose:
             print(f"Analyzing silence in: {video_path}")
 
-        # Placeholder implementation
+        # Use FFmpeg's silencedetect filter to find silent segments
+        cmd = [
+            "ffmpeg",
+            "-i", str(video_path),
+            "-af", f"silencedetect=noise={self.threshold}dB:d={self.min_duration}",
+            "-f", "null",
+            "-"
+        ]
+
+        # Run FFmpeg and capture stderr (where silencedetect outputs)
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # Parse the output to extract silence segments
         silent_segments = []
+        silence_start = None
+
+        for line in result.stderr.split('\n'):
+            if 'silencedetect' in line:
+                if 'silence_start' in line:
+                    # Extract start time
+                    parts = line.split('silence_start: ')
+                    if len(parts) > 1:
+                        silence_start = float(parts[1].strip().split()[0])
+                elif 'silence_end' in line and silence_start is not None:
+                    # Extract end time
+                    parts = line.split('silence_end: ')
+                    if len(parts) > 1:
+                        silence_end = float(parts[1].strip().split()[0])
+                        silent_segments.append((silence_start, silence_end))
+                        silence_start = None
+
+        if self.verbose:
+            print(f"Found {len(silent_segments)} silent segments")
+
         return silent_segments
 
     def get_video_duration(self, video_path: Path) -> float:
@@ -53,9 +88,24 @@ class VideoAnalyzer:
         Returns:
             Duration in seconds
         """
-        # TODO: Implement using FFprobe
-        # ffprobe -v error -show_entries format=duration -of json input.mp4
-        return 0.0
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "json",
+            str(video_path)
+        ]
+
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        data = json.loads(result.stdout)
+        duration = float(data["format"]["duration"])
+        return duration
 
     def calculate_non_silent_segments(
         self, silent_segments: List[Tuple[float, float]], total_duration: float, padding: float = 0.0
@@ -71,6 +121,26 @@ class VideoAnalyzer:
         Returns:
             List of (start, end) tuples for non-silent segments
         """
-        # TODO: Implement segment inversion logic with padding
+        if not silent_segments:
+            # No silence detected, return entire video
+            return [(0.0, total_duration)]
+
         non_silent_segments = []
+        current_time = 0.0
+
+        for silence_start, silence_end in silent_segments:
+            # Add padding around silence (shrink the silent region)
+            adjusted_start = max(0.0, silence_start + padding)
+            adjusted_end = min(total_duration, silence_end - padding)
+
+            # Only add non-silent segment if there's actual content
+            if current_time < adjusted_start:
+                non_silent_segments.append((current_time, adjusted_start))
+
+            current_time = adjusted_end
+
+        # Add final segment if there's content after last silence
+        if current_time < total_duration:
+            non_silent_segments.append((current_time, total_duration))
+
         return non_silent_segments
