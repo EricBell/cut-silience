@@ -75,12 +75,12 @@ class SegmentProcessor:
                     str(segment_file)
                 ]
 
-                # Run with progress tracking for each segment
+                # Run FFmpeg without individual segment progress (just use outer counter)
                 result = runner.run_with_progress(
                     cmd=cmd,
                     description=f"  Segment {idx+1}/{len(segments)}",
                     total_duration=duration,
-                    show_progress=show_progress and duration > 1.0  # Only show for segments > 1s
+                    show_progress=False  # Disable inner progress, rely on outer segment counter
                 )
 
                 if result.returncode == 0 and segment_file.exists():
