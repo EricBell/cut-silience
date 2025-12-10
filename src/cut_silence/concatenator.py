@@ -47,6 +47,7 @@ class VideoConcatenator:
                 "ffmpeg",
                 "-y",
                 "-i", str(segment_files[0]),
+                "-map", "0",
                 "-c", "copy",
                 str(output_path)
             ]
@@ -84,6 +85,7 @@ class VideoConcatenator:
                 "-f", "concat",
                 "-safe", "0",
                 "-i", str(concat_file),
+                "-map", "0",
                 "-c", "copy",
                 str(output_path)
             ]

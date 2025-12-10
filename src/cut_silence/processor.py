@@ -48,14 +48,16 @@ class SegmentProcessor:
             duration = end_time - start_time
 
             # Use FFmpeg to extract segment with stream copy (no re-encoding for speed)
-            # For accuracy, we use -ss before -i for fast seek, then -t for exact duration
+            # IMPORTANT: -ss MUST be before -i when using -c copy to preserve video stream
+            # This is fast but seeks to nearest keyframe (slightly less accurate)
             cmd = [
                 "ffmpeg",
                 "-y",  # Overwrite output files
+                "-ss", str(start_time),  # Start time (BEFORE -i for fast seek with copy)
                 "-i", str(video_path),  # Input file
-                "-ss", str(start_time),  # Start time (accurate when after -i)
                 "-t", str(duration),  # Duration to extract
-                "-c", "copy",  # Copy streams (no re-encoding)
+                "-map", "0",  # Map all streams from input
+                "-c", "copy",  # Copy all streams (no re-encoding)
                 "-avoid_negative_ts", "make_zero",  # Fix timestamp issues
                 str(segment_file)
             ]
