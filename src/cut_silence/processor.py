@@ -60,6 +60,12 @@ class SegmentProcessor:
                 # Calculate duration
                 duration = end_time - start_time
 
+                # Ensure segment doesn't exceed any time limits
+                if duration <= 0:
+                    if self.verbose:
+                        print(f"Skipping invalid segment {idx} (duration: {duration:.3f}s)")
+                    continue
+
                 # Use FFmpeg to extract segment with stream copy (no re-encoding for speed)
                 # IMPORTANT: -ss MUST be before -i when using -c copy to preserve video stream
                 # This is fast but seeks to nearest keyframe (slightly less accurate)

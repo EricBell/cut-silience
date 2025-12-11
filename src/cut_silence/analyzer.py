@@ -13,7 +13,7 @@ from cut_silence.ffmpeg_runner import FFmpegProgressRunner
 class VideoAnalyzer:
     """Analyzes videos to detect silent segments."""
 
-    def __init__(self, threshold: float, min_duration: float, verbose: bool = False):
+    def __init__(self, threshold: float, min_duration: float, verbose: bool = False, max_duration: float = None):
         """
         Initialize video analyzer.
 
@@ -21,10 +21,12 @@ class VideoAnalyzer:
             threshold: Silence threshold in dB
             min_duration: Minimum silence duration in seconds
             verbose: Enable verbose output
+            max_duration: Maximum duration to analyze in seconds (None for entire video)
         """
         self.threshold = threshold
         self.min_duration = min_duration
         self.verbose = verbose
+        self.max_duration = max_duration
 
     def detect_silence(self, video_path: Path, show_progress: bool = True) -> List[Tuple[float, float]]:
         """
@@ -43,6 +45,13 @@ class VideoAnalyzer:
         # Get video duration for progress tracking
         total_duration = self.get_video_duration(video_path)
 
+        # Determine the actual duration to analyze
+        analyze_duration = total_duration
+        if self.max_duration is not None:
+            analyze_duration = min(self.max_duration, total_duration)
+            if self.verbose:
+                print(f"Limiting analysis to first {analyze_duration:.2f}s")
+
         # Use FFmpeg's silencedetect filter to find silent segments
         cmd = [
             "ffmpeg",
@@ -52,12 +61,17 @@ class VideoAnalyzer:
             "-"
         ]
 
+        # Add time limit if max_duration is specified
+        if self.max_duration is not None:
+            cmd.insert(-2, "-t")  # Insert before "-"
+            cmd.insert(-2, str(self.max_duration))
+
         # Run FFmpeg with progress tracking
         runner = FFmpegProgressRunner()
         result = runner.run_with_progress(
             cmd=cmd,
             description="Detecting silence",
-            total_duration=total_duration,
+            total_duration=analyze_duration,
             show_progress=show_progress
         )
 
@@ -143,9 +157,14 @@ class VideoAnalyzer:
         Returns:
             List of (start, end) tuples for non-silent segments
         """
+        # Use max_duration if specified, otherwise use total_duration
+        effective_duration = total_duration
+        if self.max_duration is not None:
+            effective_duration = min(self.max_duration, total_duration)
+
         if not silent_segments:
-            # No silence detected, return entire video
-            return [(0.0, total_duration)]
+            # No silence detected, return entire video (up to max_duration)
+            return [(0.0, effective_duration)]
 
         non_silent_segments = []
         current_time = 0.0
@@ -153,7 +172,7 @@ class VideoAnalyzer:
         for silence_start, silence_end in silent_segments:
             # Add padding around silence (shrink the silent region)
             adjusted_start = max(0.0, silence_start + padding)
-            adjusted_end = min(total_duration, silence_end - padding)
+            adjusted_end = min(effective_duration, silence_end - padding)
 
             # Only add non-silent segment if there's actual content and it meets minimum duration
             if current_time < adjusted_start:
@@ -166,11 +185,11 @@ class VideoAnalyzer:
             current_time = adjusted_end
 
         # Add final segment if there's content after last silence
-        if current_time < total_duration:
-            duration = total_duration - current_time
+        if current_time < effective_duration:
+            duration = effective_duration - current_time
             if duration >= min_segment_duration:
-                non_silent_segments.append((current_time, total_duration))
+                non_silent_segments.append((current_time, effective_duration))
             elif self.verbose:
-                print(f"Skipping short segment ({duration:.3f}s) from {current_time:.2f}s to {total_duration:.2f}s")
+                print(f"Skipping short segment ({duration:.3f}s) from {current_time:.2f}s to {effective_duration:.2f}s")
 
         return non_silent_segments

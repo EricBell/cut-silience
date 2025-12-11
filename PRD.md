@@ -83,6 +83,7 @@ An application that automatically detects and removes silent portions from MP4 v
 - [ ] Reduce silence to minimum duration (Future enhancement)
 - [ ] Add fade in/out transitions (Future enhancement)
 - [x] Configurable padding (keep X seconds before/after speech) - Optional flag
+- [x] Process only first N minutes of video (--first-minutes flag)
 - [ ] Speed up silent segments instead of removing (Out of scope for v1.0)
 - [ ] Preview mode before final processing (Out of scope for v1.0)
 
@@ -325,6 +326,15 @@ cut-silence video.mp4 --min-duration 1.0
 cut-silence video.mp4 --threshold -35 --min-duration 1.0
 ```
 
+### Partial Processing
+```bash
+# Process only first 5 minutes of video
+cut-silence video.mp4 --first-minutes 5
+
+# Combine with other options
+cut-silence video.mp4 --first-minutes 10 --threshold -35 --padding 0.2
+```
+
 ### Padding (Keep buffer around speech)
 ```bash
 # Keep 0.2 seconds before and after speech
@@ -384,6 +394,7 @@ cut-silence --version
 ```bash
 # Full command with all options
 cut-silence lecture.mp4 \
+  --first-minutes 15 \
   --threshold -32 \
   --min-duration 0.8 \
   --padding 0.3 \

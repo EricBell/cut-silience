@@ -30,11 +30,12 @@ def parse_arguments(args: List[str] = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  cut-silence video.mp4                    # Process single video
-  cut-silence *.mp4                        # Process multiple videos
-  cut-silence video.mp4 --threshold -35    # Custom silence threshold
-  cut-silence video.mp4 --padding 0.3      # Add padding around speech
-  cut-silence video.mp4 --dry-run          # Preview without processing
+  cut-silence video.mp4                     # Process single video
+  cut-silence *.mp4                         # Process multiple videos
+  cut-silence video.mp4 --threshold -35     # Custom silence threshold
+  cut-silence video.mp4 --padding 0.3       # Add padding around speech
+  cut-silence video.mp4 --first-minutes 5   # Process first 5 minutes only
+  cut-silence video.mp4 --dry-run           # Preview without processing
         """,
     )
 
@@ -77,6 +78,12 @@ Examples:
     )
 
     parser.add_argument(
+        "--first-minutes",
+        type=float,
+        help="Process only the first N minutes of the video",
+    )
+
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be removed without processing",
@@ -111,6 +118,12 @@ def validate_arguments(args: argparse.Namespace) -> None:
         print("Error: --output can only be used with a single input file", file=sys.stderr)
         sys.exit(1)
 
+    # Validate first-minutes argument
+    if hasattr(args, 'first_minutes') and args.first_minutes is not None:
+        if args.first_minutes <= 0:
+            print("Error: --first-minutes must be a positive number", file=sys.stderr)
+            sys.exit(1)
+
     # Check if all input files exist
     for input_file in args.input_files:
         if not input_file.exists():
@@ -131,6 +144,7 @@ def process_video(
     verbose: bool,
     dry_run: bool,
     export_segments_path: Path = None,
+    first_minutes: float = None,
 ) -> bool:
     """
     Process a single video file to remove silence.
@@ -140,8 +154,15 @@ def process_video(
     """
     print(f"\nProcessing: {input_file}")
 
+    # Calculate max duration if first_minutes is specified
+    max_duration = None
+    if first_minutes is not None:
+        max_duration = first_minutes * 60.0  # Convert minutes to seconds
+        if verbose:
+            print(f"Processing first {first_minutes} minutes ({max_duration:.1f}s) only")
+
     # Initialize components
-    analyzer = VideoAnalyzer(threshold, min_duration, verbose)
+    analyzer = VideoAnalyzer(threshold, min_duration, verbose, max_duration)
     processor = SegmentProcessor(verbose)
     concatenator = VideoConcatenator(verbose)
     reporter = ProgressReporter(verbose)
@@ -153,6 +174,12 @@ def process_video(
         total_duration = analyzer.get_video_duration(input_file)
         if verbose:
             print(f"Video duration: {total_duration:.2f}s")
+
+        # Check if first_minutes exceeds video duration
+        if max_duration is not None and max_duration > total_duration:
+            print(f"Warning: --first-minutes ({first_minutes:.1f}m) exceeds video duration ({total_duration/60:.1f}m)")
+            print(f"Processing entire video instead")
+            max_duration = None
 
         # Step 2: Detect silence
         if verbose:
@@ -187,11 +214,16 @@ def process_video(
 
         if dry_run:
             print(f"\nDry-run preview:")
-            print(f"  Original duration:  {reporter._format_time(total_duration)}")
-            print(f"  Silence detected:   {reporter._format_time(silence_duration)}")
-            print(f"  Output duration:    {reporter._format_time(output_duration)}")
-            reduction = (silence_duration / total_duration * 100) if total_duration > 0 else 0
-            print(f"  Reduction:          {reduction:.1f}%")
+            if max_duration is not None:
+                print(f"  Processing duration: {reporter._format_time(max_duration)} (limited)")
+                print(f"  Original duration:   {reporter._format_time(total_duration)}")
+            else:
+                print(f"  Original duration:   {reporter._format_time(total_duration)}")
+            print(f"  Silence detected:    {reporter._format_time(silence_duration)}")
+            print(f"  Output duration:     {reporter._format_time(output_duration)}")
+            effective_total = max_duration if max_duration is not None else total_duration
+            reduction = (silence_duration / effective_total * 100) if effective_total > 0 else 0
+            print(f"  Reduction:           {reduction:.1f}%")
             print(f"\nOutput would be saved to: {output_file}")
             return True
 
@@ -256,6 +288,8 @@ def main():
         print(f"Silence threshold: {args.threshold} dB")
         print(f"Min silence duration: {args.duration}s")
         print(f"Padding: {args.padding}s")
+        if hasattr(args, 'first_minutes') and args.first_minutes is not None:
+            print(f"First minutes: {args.first_minutes}")
         print(f"Dry-run: {args.dry_run}")
         print()
 
@@ -282,6 +316,7 @@ def main():
             verbose=args.verbose,
             dry_run=args.dry_run,
             export_segments_path=args.export_segments,
+            first_minutes=getattr(args, 'first_minutes', None),
         )
 
         if success:
